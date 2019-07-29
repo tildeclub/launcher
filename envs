@@ -102,7 +102,7 @@ verify_script_name() {
   [[ $(type -P "$1") ]] &&
     [[ -x $HOME/bin/$1 ]] ||
     error_exit "$1 already exists. rename your script and try again."
-  [[ -x /tilde/bin/$1 ]] && error_exit "$1 is already taken. rename your script and try again."
+  [[ -x /envs/bin/$1 ]] && error_exit "$1 is already taken. rename your script and try again."
   case $1 in
     about|description|list|ls|submit|about|help|apropos|submit|approve)
       error_exit "$1 is a subcommand of envs. rename your script and try again." ;;
@@ -170,7 +170,7 @@ case $1 in
 
   list | ls)
     echo -e "available scripts:\n"
-    for scr in /tilde/bin/*; do
+    for scr in /envs/bin/*; do
       script_name=$(basename $scr)
       target=$(readlink -f "$scr")
       echo "$script_name by "$(stat -c '%U' $target)
