@@ -1,0 +1,33 @@
+.TH envs 1 "5 September 2018" "v0.0.2"
+.SH NAME
+envs \- user script wrapper and submission tool
+.SH SYNOPSIS
+.B envs [options] (scriptname)
+.P
+.SH DESRIPTION
+.B envs
+is a wrapper around user-submitted scripts.
+any accepted script in /envs/bin can be run with
+the wrapper feature.
+
+users can submit any script in their ~/bin directory
+which will be mailed to admins for review.
+.SH USAGE
+.TP
+.B envs list
+List all available scripts in /envs/bin
+.TP
+.B envs [scriptname]
+Run scriptname.
+.TP
+.B envs submit
+Submit a script from your ~/bin directory
+.TP
+.B envs about [scriptname]
+Get the submitter's description for a script.
+.SH DEPENDENCIES
+None.
+.SH BUGS
+None known. Please submit to https://tildegit.org/team/tilde-launcher/issues
+.SH AUTHOR
+Ben Harris <ben (at) tilde (dot) team>

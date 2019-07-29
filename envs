@@ -1,0 +1,272 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# envs - manage user-submitted scripts and apps
+# forked from tilde
+
+# Copyright 2018, Ben Harris <ben@tilde.team>
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# Usage: envs [-h|--help]
+
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.0.2"
+
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+
+error_exit() {
+  echo -e "${1:-"unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: terminating on unknown signal" ;;
+  esac
+}
+
+
+prompt_confirm() {
+  while true; do
+    read -r -n 1 -p "${1:-continue?} [y/n]: " REPLY
+    case $REPLY in
+      [yY]) echo ; return 0 ;;
+      [nN]) echo ; return 1 ;;
+      *) printf " \033[31m %s \n\033[0m" "invalid input"
+    esac
+  done
+}
+
+
+usage() {
+  echo -e "\nusage: $PROGNAME [help|list|submit|about|script_name]\n"
+  echo "  $PROGNAME list                 - show a list of approved userscripts"
+  echo "  $PROGNAME submit               - start the submission flow for your own script"
+  [[ $(id -u) == 0 ]] && {
+    echo "  $PROGNAME approve              - enter the approval queue"
+    echo "  $PROGNAME revoke <script_name> - send a script back to the author and remove from /envs/bin"
+  }
+  echo "  $PROGNAME about <script_name>  - get the description for script_name"
+  echo "  $PROGNAME <script_name>        - run script_name with all remaining args are passed to the script"
+
+  if [[ :$PATH: != *:"/envs/bin":* ]] ; then
+    echo -e "\nadd /envs/bin to your PATH to use approved scripts without this wrapper"
+    echo "if you're using bash, run the following to add it quickly"
+    echo "  echo 'export PATH=\$PATH:/envs/bin' >> ~/.bashrc && source ~/.bashrc"
+  fi
+}
+
+
+help_message() {
+  cat <<- _EOF_
+$PROGNAME ver. $VERSION
+wrapper for user-submitted scripts
+supports user submission and admin approval
+$(usage)
+_EOF_
+  return
+}
+
+
+verify_script_name() {
+  [[ $1 == "" ]] && error_exit "please start over and enter the script name"
+  [[ $(type -P "$1") ]] &&
+    [[ -x $HOME/bin/$1 ]] ||
+    error_exit "$1 already exists. rename your script and try again."
+  [[ -x /tilde/bin/$1 ]] && error_exit "$1 is already taken. rename your script and try again."
+  case $1 in
+    about|description|list|ls|submit|about|help|apropos|submit|approve)
+      error_exit "$1 is a subcommand of envs. rename your script and try again." ;;
+    *)
+      return ;;
+  esac
+}
+
+
+submission_checklist() {
+  cat <<- _EOF_
+requirements for submitting a user script or program:
+
+  - placed in your ~/bin
+  - executable
+  - responds to help or --help
+  - no name collisions with existing scripts or $PROGNAME subcommands
+
+_EOF_
+}
+
+
+mail_body() {
+  cat <<- _EOF_
+Subject: envs script submission from $USER
+From: $USER@envs.net
+To: creme@envs.net
+
+envs script submission from $USER
+
+script name: $1
+
+description:
+-----------------------------------------------------------------------
+
+$2
+
+-----------------------------------------------------------------------
+you'll find the script and description in: /envs/pending-submissions/$USER/$1
+
+run this to see the approval queue:
+sudo launcher approve
+_EOF_
+}
+
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# Check for root UID
+
+
+# Parse command-line
+case $1 in
+  -h | --help | help)
+    help_message; graceful_exit ;;
+
+  -v | --version)
+    echo $VERSION ;;
+
+  -* | --*)
+    usage
+    error_exit "Unknown option $1" ;;
+
+  list | ls)
+    echo -e "available scripts:\n"
+    for scr in /tilde/bin/*; do
+      script_name=$(basename $scr)
+      target=$(readlink -f "$scr")
+      echo "$script_name by "$(stat -c '%U' $target)
+      cat /envs/descriptions/$script_name
+      echo ""
+    done ;;
+
+  about | apropos | description)
+    if [[ -f /envs/descriptions/$2 ]]; then
+      cat /envs/descriptions/$2
+    else
+      echo "$2 not found. try $PROGNAME list to see available user scripts."
+    fi
+  ;;
+
+  submit)
+    echo "hello, $USER! so it's time to submit your script?"
+    submission_checklist
+    prompt_confirm "are you ready to continue?" || graceful_exit
+    echo -n "enter the name of your script: "
+    read script_name
+
+    verify_script_name $script_name
+
+    if [[ -x $HOME/bin/$script_name ]]; then
+      echo "cool, found your script"
+      [[ -x /envs/pending-submissions/$USER/$script_name/$script_name ]] && error_exit "you've already submitted $script_name"
+    else
+      error_exit "$script_name not found in ~/bin"
+    fi
+
+    echo "enter a description of your script: "
+    read description
+    echo -e "\nyour script, along with your description will be sent to the admins for approval"
+    prompt_confirm "ready to submit?" || graceful_exit
+
+    # submit now
+    mkdir -p /envs/pending-submissions/$USER/$script_name
+    ln -s $HOME/bin/$script_name /envs/pending-submissions/$USER/$script_name/$script_name
+    echo $description > /envs/pending-submissions/$USER/$script_name/description.txt
+    mail_body $script_name "$description" | sendmail creme
+    echo "script submitted. thanks! :)" ;;
+
+  approve)
+    [[ $(id -u) != 0 ]] && error_exit "re-run this as sudo to access the approval queue"
+
+    echo -e "welcome to the approval queue\n\n"
+
+    for user in /envs/pending-submissions/*; do
+      for scr in $user/*; do
+        user=$(basename $user)
+        script_name=$(basename $scr)
+        [[ -f $scr/approved ]] && continue
+        script=$scr/$script_name
+        echo "$script_name by $user"
+        cat $scr/description.txt
+        prompt_confirm "approve?" || continue
+
+        sudo ln -s $(readlink -f $script) /envs/bin/$script_name
+        sudo cp $scr/description.txt /envs/descriptions/$script_name
+        sudo touch $scr/approved
+        sudo chmod 664 /envs/descriptions/*
+        echo "your submission of $script_name has been approved and is now available at /envs/bin/$script_name" | sendmail $user
+      done
+    done
+    echo "~~done for now~~" ;;
+
+  revoke)
+    [[ $(id -u) != 0 ]] && error_exit "re-run this as sudo to access the revoke menu"
+    [[ -f /envs/bin/$2 ]] || error_exit "$2 isn't an approved script"
+
+    prompt_confirm "revoke $2?"
+    echo -n "please provide a reason: "
+    read reason
+
+    original_script=$(readlink -f /envs/bin/$2)
+    author=$(stat -c '%U' $original_script)
+    sudo rm /envs/{bin,descriptions}/$2
+    sudo rm -rf /envs/pending-submissions/$author/$2
+
+    echo -e "your script $2 has been returned because: $reason\nfeel free to resubmit" | sendmail $author
+    echo "$2 revoked and returned to author" ;;
+
+  *)
+    if [[ -f /envs/bin/$1 ]]; then
+      prog=/envs/bin/$1
+      shift
+      $prog "$@"
+      graceful_exit
+    else
+      [[ $1 == "" ]] || echo -e "$1 not found. try $PROGNAME list to see what's available\n"
+      help_message; graceful_exit;
+    fi ;;
+
+esac
+
+# Main logic
+
+graceful_exit
