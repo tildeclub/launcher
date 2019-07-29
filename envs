@@ -99,9 +99,9 @@ _EOF_
 
 verify_script_name() {
   [[ $1 == "" ]] && error_exit "please start over and enter the script name"
-  [[ $(type -P "$1") ]] &&
-    [[ -x $HOME/bin/$1 ]] ||
+  if [[ $(type "$1" > /dev/null 2>&1) ]]; then
     error_exit "$1 already exists. rename your script and try again."
+  fi
   [[ -x /envs/bin/$1 ]] && error_exit "$1 is already taken. rename your script and try again."
   case $1 in
     about|description|list|ls|submit|about|help|apropos|submit|approve)
