@@ -211,7 +211,7 @@ case $1 in
     mkdir -p /envs/pending-submissions/$USER/$script_name
     ln -s $HOME/bin/$script_name /envs/pending-submissions/$USER/$script_name/$script_name
     echo $description > /envs/pending-submissions/$USER/$script_name/description.txt
-    mail_body $script_name "$description" | sendmail creme
+    mail_body $script_name "$description" | /usr/sbin/sendmail creme
     echo "script submitted. thanks! :)" ;;
 
   approve)
@@ -233,7 +233,7 @@ case $1 in
         sudo cp $scr/description.txt /envs/descriptions/$script_name
         sudo touch $scr/approved
         sudo chmod 664 /envs/descriptions/*
-        echo "your submission of $script_name has been approved and is now available at /envs/bin/$script_name" | sendmail $user
+        echo "your submission of $script_name has been approved and is now available at /envs/bin/$script_name" | /usr/sbin/sendmail $user
       done
     done
     echo "~~done for now~~" ;;
@@ -251,7 +251,7 @@ case $1 in
     sudo rm /envs/{bin,descriptions}/$2
     sudo rm -rf /envs/pending-submissions/$author/$2
 
-    echo -e "your script $2 has been returned because: $reason\nfeel free to resubmit" | sendmail $author
+    echo -e "your script $2 has been returned because: $reason\nfeel free to resubmit" | /usr/sbin/sendmail $author
     echo "$2 revoked and returned to author" ;;
 
   *)
