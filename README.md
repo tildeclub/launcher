@@ -18,4 +18,4 @@ approved scripts are placed in /envs/bin and listed with `envs list`
 
 submissions use sendmail to notify an admin.
 
-admins can use `sudo launcher approve` and `sudo launcher revoke <script_name>`.
+admins can use `sudo envs approve` and `sudo envs revoke <script_name>`.

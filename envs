@@ -144,7 +144,7 @@ $2
 you'll find the script and description in: /envs/pending-submissions/$USER/$1
 
 run this to see the approval queue:
-sudo launcher approve
+sudo envs approve
 _EOF_
 }
 
