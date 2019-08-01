@@ -1,7 +1,7 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
 # envs - manage user-submitted scripts and apps
-# forked from tilde
+# forked from tilde.team
 
 # Copyright 2018, Ben Harris <ben@tilde.team>
 
@@ -21,7 +21,7 @@
 # ---------------------------------------------------------------------------
 
 PROGNAME=${0##*/}
-VERSION="0.0.2"
+VERSION="0.0.1"
 
 
 clean_up() { # Perform pre-exit housekeeping
