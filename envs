@@ -72,7 +72,7 @@ prompt_confirm() {
 
 
 usage() {
-  printf '\n%sUser json-File Infomations%s\n' "$(tput setaf 6)" "$(tput sgr0)"
+  printf '\n%sUser Scripts%s\n' "$(tput setaf 6)" "$(tput sgr0)"
   printf '\nusage: %s [help|list|submit|about|script_name]\n' "$PROGNAME"
   printf '  %s list                  - show a list of approved userscripts\n' "$PROGNAME"
   printf '  %s submit                - start the submission flow for your own script\n' "$PROGNAME"
@@ -84,7 +84,7 @@ usage() {
   printf '  %s <script_name>         - run script_name with all remaining args are passed to the script\n' "$PROGNAME"
 
   printf '\n%sUser json-File Infomations%s\n' "$(tput setaf 6)" "$(tput sgr0)"
-  printf 'usage: %s [show]|[edit]|[get name]|[set name value]|[unset name]\n' "$PROGNAME"
+  printf '\nusage: %s [show]|[edit]|[get name]|[set name value]|[unset name]\n' "$PROGNAME"
   printf '  %s show                  - show your config file\n' "$PROGNAME"
   printf '  %s edit                  - edit your config file\n' "$PROGNAME"
   printf '  %s get <entry>           - show a entry from your config\n' "$PROGNAME"
