@@ -169,7 +169,7 @@ case "$1" in
     error_exit "Unknown option $1" ;;
 
   list | ls)
-    printf 'available scripts:\n'
+    printf 'available scripts:\n\n'
     for scr in /envs/bin/*; do
       script_name=$(basename "$scr")
       target=$(readlink -f "$scr")
