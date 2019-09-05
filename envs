@@ -155,8 +155,6 @@ EOF
 trap "signal_exit TERM" TERM HUP
 trap "signal_exit INT"  INT
 
-# Check for root UID
-
 
 # Parse command-line
 case "$1" in
@@ -268,7 +266,5 @@ case "$1" in
     fi ;;
 
 esac
-
-# Main logic
 
 graceful_exit
