@@ -117,7 +117,7 @@ verify_script_name() {
   fi
   [[ -x /envs/bin/"$1" ]] && error_exit "$1 is already taken. rename your script and try again."
   case "$1" in
-    help|about|description|desc|list|ls|submit|apropos|approve|revoke)
+    help|about|description|desc|list|ls|submit|apropos|approve|revoke|show|edit|get|set|unset)
       error_exit "$1 is a subcommand of envs. rename your script and try again.";;
     *)
       return;;
