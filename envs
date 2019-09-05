@@ -19,6 +19,7 @@
 # Usage: envs [-h|--help]
 
 # ---------------------------------------------------------------------------
+export TERM=xterm-256color
 
 PROGNAME=${0##*/}
 VERSION="0.0.1"
@@ -173,7 +174,7 @@ case $1 in
     for scr in /envs/bin/*; do
       script_name=$(basename $scr)
       target=$(readlink -f "$scr")
-      echo "$script_name by "$(stat -c '%U' $target)
+      printf '%s%s by %s%s' "$(tput setaf 6)" "$script_name" "$(stat -c '%U' $target)" "$(tput sgr0)"
       cat /envs/descriptions/$script_name
       echo ""
     done ;;
