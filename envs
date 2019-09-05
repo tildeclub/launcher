@@ -174,7 +174,7 @@ case $1 in
     for scr in /envs/bin/*; do
       script_name=$(basename $scr)
       target=$(readlink -f "$scr")
-      printf '%s%s by %s%s' "$(tput setaf 6)" "$script_name" "$(stat -c '%U' $target)" "$(tput sgr0)"
+      printf '%s%s by %s%s\n' "$(tput setaf 6)" "$script_name" "$(stat -c '%U' $target)" "$(tput sgr0)"
       cat /envs/descriptions/$script_name
       echo ""
     done ;;
