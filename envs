@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# envs - manage user-submitted scripts and apps
+# envs - manage users_info.json entrys and user-submitted scripts and apps
 # forked from tilde.team
 
 # Copyright 2018-2019, Ben Harris <ben@tilde.team>
@@ -23,7 +23,9 @@
 export TERM=xterm-256color
 
 PROGNAME=${0##*/}
-VERSION="0.0.2"
+VERSION="0.0.3"
+
+INFO_FILE=/home/"$USER"/.envs
 
 
 clean_up() { # Perform pre-exit housekeeping
@@ -70,15 +72,24 @@ prompt_confirm() {
 
 
 usage() {
+  printf '\n%sUser json-File Infomations%s\n' "$(tput setaf 6)" "$(tput sgr0)"
   printf '\nusage: %s [help|list|submit|about|script_name]\n' "$PROGNAME"
-  printf '  %s list                 - show a list of approved userscripts\n' "$PROGNAME"
-  printf '  %s submit               - start the submission flow for your own script\n' "$PROGNAME"
+  printf '  %s list                  - show a list of approved userscripts\n' "$PROGNAME"
+  printf '  %s submit                - start the submission flow for your own script\n' "$PROGNAME"
   [[ $(id -u) == 0 ]] && {
-    printf '  %s approve              - enter the approval queue\n' "$PROGNAME"
-    printf '  %s revoke <script_name> - send a script back to the author and remove from /envs/bin\n' "$PROGNAME"
+    printf '  %s approve               - enter the approval queue\n' "$PROGNAME"
+    printf '  %s revoke <script_name>  - send a script back to the author and remove from /envs/bin\n' "$PROGNAME"
   }
-  printf '  %s about <script_name>  - get the description for script_name\n' "$PROGNAME"
-  printf '  %s <script_name>        - run script_name with all remaining args are passed to the script\n' "$PROGNAME"
+  printf '  %s about <script_name>   - get the description for script_name\n' "$PROGNAME"
+  printf '  %s <script_name>         - run script_name with all remaining args are passed to the script\n' "$PROGNAME"
+
+  printf '\n%sUser json-File Infomations%s\n' "$(tput setaf 6)" "$(tput sgr0)"
+  printf 'usage: %s [show]|[edit]|[get name]|[set name value]|[unset name]\n' "$PROGNAME"
+  printf '  %s show                  - show your config file\n' "$PROGNAME"
+  printf '  %s edit                  - edit your config file\n' "$PROGNAME"
+  printf '  %s get <entry>           - show a entry from your config\n' "$PROGNAME"
+  printf "  %s set <entry> <'value'> - set a entry to your config\n" "$PROGNAME"
+  printf '  %s unset <entry>         - unset a entry from your config\n' "$PROGNAME"
 
   if [[ :$PATH: != *:"/envs/bin":* ]] ; then
     printf "\nadd /envs/bin to your PATH to use approved scripts without this wrapper\n"
@@ -90,9 +101,9 @@ usage() {
 
 help_message() {
   cat <<- EOF
-$PROGNAME (ver. $VERSION)
-wrapper for user-submitted scripts
-supports user submission and admin approval
+$(tput setaf 6)$PROGNAME (ver. $VERSION)$(tput sgr0)
+wrapper for user-submitted scripts and users_info.json entrys
+supports user settings, submission and admin approval
 $(usage)
 EOF
   return
@@ -159,14 +170,18 @@ trap "signal_exit INT"  INT
 # Parse command-line
 case "$1" in
   -h | --help | help)
-    help_message; graceful_exit ;;
+    help_message; graceful_exit
+  ;;
 
   -v | --version)
-    printf '%s\n' "$VERSION" ;;
+    printf '%s\n' "$VERSION"
+  ;;
 
   '-*' | '--*')
     usage
-    error_exit "Unknown option $1" ;;
+    error_exit "Unknown option $1"
+  ;;
+
 
   list | ls)
     printf 'available scripts:\n\n'
@@ -176,7 +191,8 @@ case "$1" in
       printf '%s%s by %s%s\n' "$(tput setaf 6)" "$script_name" "$(stat -c '%U' "$target")" "$(tput sgr0)"
       cat /envs/descriptions/"$script_name"
       printf '\n'
-    done ;;
+    done
+  ;;
 
   about | apropos | description | desc)
     if [[ -f /envs/descriptions/"$2" ]]; then
@@ -212,7 +228,8 @@ case "$1" in
     ln -s "$HOME"/bin/"$script_name" /envs/pending-submissions/"$USER"/"$script_name"/"$script_name"
     echo "$description" > /envs/pending-submissions/"$USER"/"$script_name"/description.txt
     mail_body "$script_name" "$description" | /usr/sbin/sendmail creme
-    printf 'script submitted. thanks! :)\n' ;;
+    printf 'script submitted. thanks! :)\n'
+  ;;
 
   approve)
     [[ $(id -u) != 0 ]] && error_exit "re-run this as sudo to access the approval queue"
@@ -236,7 +253,8 @@ case "$1" in
         echo "your submission of $script_name has been approved and is now available at /envs/bin/$script_name" | /usr/sbin/sendmail "$user"
       done
     done
-    echo "~~done for now~~" ;;
+    echo "~~done for now~~"
+  ;;
 
   revoke)
     [[ "$(id -u)" != 0 ]] && error_exit "re-run this as sudo to access the revoke menu"
@@ -252,7 +270,34 @@ case "$1" in
     sudo rm -rf /envs/pending-submissions/"$author"/"$2"
 
     echo -e "your script $2 has been returned because: $reason\nfeel free to resubmit" | /usr/sbin/sendmail "$author"
-    printf '%s revoked and returned to author\n' "$2" ;;
+    printf '%s revoked and returned to author\n' "$2"
+  ;;
+
+
+  show)
+    cat "$INFO_FILE"
+  ;;
+
+  edit)
+    if [[ -n "$EDITOR" ]]; then "$EDITOR" "$INFO_FILE"; else nano "INFO_FILE"; fi
+  ;;
+
+  get)
+    sed -n "/^$2/{s#^.*=##;p}" "$INFO_FILE"
+  ;;
+
+  set)
+    if [ -z "$(cat < "$INFO_FILE" | sed -n /^"$2"/p)" ]; then
+      echo "${2}=${3}" >> "$INFO_FILE"
+    else
+      sed -i "s#${2}=.*#${2}=${3}#" "$INFO_FILE"
+    fi
+  ;;
+
+  unset)
+    sed -i "s#${2}=.*#${2}=#" "$INFO_FILE"
+  ;;
+
 
   *)
     if [[ -f /envs/bin/"$1" ]]; then
@@ -263,8 +308,10 @@ case "$1" in
     else
       [[ "$1" == "" ]] || printf "%s not found. try %s list to see what's available\n" "$1" "$PROGNAME"
       help_message; graceful_exit;
-    fi ;;
+    fi
+  ;;
 
 esac
 
+#
 graceful_exit
