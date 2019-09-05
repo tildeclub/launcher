@@ -3,7 +3,8 @@
 # envs - manage user-submitted scripts and apps
 # forked from tilde.team
 
-# Copyright 2018, Ben Harris <ben@tilde.team>
+# Copyright 2018-2019, Ben Harris <ben@tilde.team>
+# Copyright 2019, Sven Kinne <creme@envs.net>
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,7 +23,7 @@
 export TERM=xterm-256color
 
 PROGNAME=${0##*/}
-VERSION="0.0.1"
+VERSION="0.0.2"
 
 
 clean_up() { # Perform pre-exit housekeeping
@@ -89,7 +90,7 @@ usage() {
 
 help_message() {
   cat <<- EOF
-$PROGNAME ver. $VERSION
+$PROGNAME (ver. $VERSION)
 wrapper for user-submitted scripts
 supports user submission and admin approval
 $(usage)
