@@ -73,12 +73,13 @@ usage() {
   printf '\nusage: %s [help|list|submit|about|script_name]\n' "$PROGNAME"
   printf '  %s list                 - show a list of approved userscripts\n' "$PROGNAME"
   printf '  %s submit               - start the submission flow for your own script\n' "$PROGNAME"
-  printf '  %s about <script_name>  - get the description for script_name\n' "$PROGNAME"
-  printf '  %s <script_name>        - run script_name with all remaining args are passed to the script\n' "$PROGNAME"
   [[ $(id -u) == 0 ]] && {
     printf '  %s approve              - enter the approval queue\n' "$PROGNAME"
     printf '  %s revoke <script_name> - send a script back to the author and remove from /envs/bin\n' "$PROGNAME"
   }
+  printf '  %s about <script_name>  - get the description for script_name\n' "$PROGNAME"
+  printf '  %s <script_name>        - run script_name with all remaining args are passed to the script\n' "$PROGNAME"
+
   if [[ :$PATH: != *:"/envs/bin":* ]] ; then
     printf "\nadd /envs/bin to your PATH to use approved scripts without this wrapper\n"
     printf "if you're using bash, run the following to add it quickly\n"
