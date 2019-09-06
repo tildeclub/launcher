@@ -283,7 +283,7 @@ case "$1" in
   ;;
 
   get)
-    sed -n "/^$2/{s#^.*=##;p}" "$INFO_FILE"
+    sed -n "/^$2=/{s#^.*=##;p}" "$INFO_FILE"
   ;;
 
   set)
