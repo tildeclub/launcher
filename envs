@@ -23,10 +23,11 @@
 export TERM=xterm-256color
 
 PROGNAME=${0##*/}
-VERSION="0.0.3"
+VERSION="0.0.4"
 
 INFO_FILE="$(pwd)/.envs"
 
+###
 
 clean_up() { # Perform pre-exit housekeeping
   return
@@ -160,6 +161,22 @@ run this to see the approval queue:
 sudo envs approve
 EOF
 }
+
+# add default config if not exists
+if [ ! -f "$INFO_FILE" ]; then
+  cat << EOF > "$INFO_FILE"
+#
+# ENVS.NET - user information config
+#
+# here you can add more details to youre users_info.json part
+#
+desc=a short describtion or message
+
+git=
+mastodon=
+
+EOF
+fi
 
 
 # Trap signals
