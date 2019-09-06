@@ -287,7 +287,7 @@ case "$1" in
   ;;
 
   set)
-    if [ -z "$(cat < "$INFO_FILE" | sed -n /^"$2"/p)" ]; then
+    if [ -z "$(cat < "$INFO_FILE" | sed -n /^"$2"=/p)" ]; then
       echo "${2}=${3}" >> "$INFO_FILE"
     else
       sed -i "s#${2}=.*#${2}=${3}#" "$INFO_FILE"
