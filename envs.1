@@ -1,6 +1,7 @@
-.TH envs 1 "9 June 2019" "v0.0.1"
+.TH envs 1 "06 September 2019" "v0.0.4"
 .SH NAME
-envs \- user script wrapper and submission tool
+envs \- wrapper for user-submitted scripts and users_info.json entrys
+supports user settings, submission and admin approval
 .SH SYNOPSIS
 .B envs [options] (scriptname)
 .P
@@ -12,6 +13,8 @@ the wrapper feature.
 
 users can submit any script in their ~/bin directory
 which will be mailed to admins for review.
+
+users can also manage youre `users_info.json` entrys from the `~/.envs`-file.
 .SH USAGE
 .TP
 .B envs list
@@ -25,9 +28,25 @@ Submit a script from your ~/bin directory
 .TP
 .B envs about [scriptname]
 Get the submitter's description for a script.
+.B envs show
+show your config file
+.TP
+.B envs edit
+edit your config file
+.TP
+.B envs get <entry>
+show a entry from your config
+.TP
+.B envs set <entry> <'value'>
+set a entry to your config
+.TP
+.B envs unset <entry>
+unset a entry from your config
+.TP
 .SH DEPENDENCIES
 None.
 .SH BUGS
 None known. Please submit to https://git.envs.net/envs/envs_launcher/issues
 .SH AUTHOR
-Ben Harris <creme (at) envs (dot) net>
+Ben Harris <ben (at) tilde (dot) team>
+Sven Kinne <creme (at) envs (dot) net>

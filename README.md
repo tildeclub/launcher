@@ -1,4 +1,4 @@
-# `envs` - user script envs-launcher
+# `envs` - manage users_info.json entrys and user-submitted scripts
 
 forked from [tilde](https://tildegit.org/team/tilde-launcher)
 
@@ -29,3 +29,5 @@ approved scripts are placed in /envs/bin and listed with `envs list`
 submissions use sendmail to notify an admin.
 
 admins can use `sudo envs approve` and `sudo envs revoke <script_name>`.
+
+users can also manage youre `users_info.json` entrys from the `~/.envs`-file.

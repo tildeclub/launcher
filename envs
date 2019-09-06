@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# envs - manage users_info.json entrys and user-submitted scripts and apps
+# envs - manage users_info.json entrys and user-submitted scripts
 # forked from tilde.team
 
 # Copyright 2018-2019, Ben Harris <ben@tilde.team>
