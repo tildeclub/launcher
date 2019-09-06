@@ -172,8 +172,9 @@ if [ ! -f "$INFO_FILE" ]; then
 #
 desc=a short describtion or message
 
-git=
-mastodon=
+#add more informations
+#git=
+#mastodon=
 
 EOF
 fi
