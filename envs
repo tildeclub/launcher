@@ -23,7 +23,7 @@
 export TERM=xterm-256color
 
 PROGNAME=${0##*/}
-VERSION="0.0.4"
+VERSION="0.0.5"
 
 INFO_FILE="/home/$(id -un)/.envs"
 
@@ -172,9 +172,13 @@ if [ ! -f "$INFO_FILE" ]; then
 #
 desc=a short describtion or message
 
-#add more informations
+# add more informations (max. 100 entrys)
 #git=
 #mastodon=
+# you can also add a array with unlimeted entrys
+#name=line1
+#name=line2
+#nametwo=line1
 
 EOF
 fi
