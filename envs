@@ -172,7 +172,7 @@ if [ ! -f "$INFO_FILE" ]; then
 #
 desc=a short describtion or message
 
-# add more informations (max. 100 entrys)
+# add more informations (max. 10 entrys)
 #git=
 #mastodon=
 # you can also add a array with unlimeted entrys
