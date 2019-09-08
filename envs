@@ -167,7 +167,7 @@ if [ ! -f "$INFO_FILE" ]; then
   cat << EOF > "$INFO_FILE"
 #
 # ENVS.NET - user information config
-#
+# ( will be updated every hour )
 # here you can add more details to youre users_info.json part
 #
 desc=a short describtion or message
