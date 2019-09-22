@@ -1,52 +1,52 @@
-.TH envs 1 "06 September 2019" "v0.0.4"
+.TH tilde 1 "06 September 2019" "v0.0.4"
 .SH NAME
-envs \- wrapper for user-submitted scripts and users_info.json entrys
+tilde \- wrapper for user-submitted scripts and users_info.json entrys
 supports user settings, submission and admin approval
 .SH SYNOPSIS
-.B envs [options] (scriptname)
+.B tilde [options] (scriptname)
 .P
 .SH DESRIPTION
-.B envs
+.B tilde
 is a wrapper around user-submitted scripts.
-any accepted script in /envs/bin can be run with
+any accepted script in /tilde/bin can be run with
 the wrapper feature.
 
 users can submit any script in their ~/bin directory
 which will be mailed to admins for review.
 
-users can also manage youre `users_info.json` entrys from the `~/.envs`-file.
+users can also manage your `users_info.json` entries from the `~/.tilde`-file.
 .SH USAGE
 .TP
-.B envs list
-List all available scripts in /envs/bin
+.B tilde list
+List all available scripts in /tilde/bin
 .TP
-.B envs [scriptname]
+.B tilde [scriptname]
 Run scriptname.
 .TP
-.B envs submit
+.B tilde submit
 Submit a script from your ~/bin directory
 .TP
-.B envs about [scriptname]
+.B tilde about [scriptname]
 Get the submitter's description for a script.
 .TP
-.B envs show
+.B tilde show
 show your config file
 .TP
-.B envs edit
+.B tilde edit
 edit your config file
 .TP
-.B envs get <entry>
+.B tilde get <entry>
 show a entry from your config
 .TP
-.B envs set <entry> <'value'>
+.B tilde set <entry> <'value'>
 set a entry to your config
 .TP
-.B envs unset <entry>
+.B tilde unset <entry>
 unset a entry from your config
 .SH DEPENDENCIES
 None.
 .SH BUGS
-None known. Please submit to https://git.envs.net/envs/envs_launcher/issues
+None known. Please submit to https://github.com/tildeclub/launcher
 .SH AUTHOR
 Ben Harris <ben (at) tilde (dot) team>
 
