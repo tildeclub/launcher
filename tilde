@@ -89,6 +89,8 @@ usage() {
     printf "if you're using bash, run the following to add it quickly\n"
     printf "  echo 'export PATH=\$PATH:/tilde/bin' >> ~/.bashrc && source ~/.bashrc\n"
   fi
+
+  printf '\nSource is on github: https://github.com/tildeclub/launcher, please open an issue or send in a PR!\n'
 }
 
 
@@ -266,7 +268,7 @@ case "$1" in
   ;;
 
   *)
-    if [[ -x /tilde/bin/"$1" ]]; then
+    if [[ -f /tilde/bin/"$1" ]]; then
       prog=/tilde/bin/"$1"
       shift
       $prog "$@"
