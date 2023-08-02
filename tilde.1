@@ -1,53 +1,76 @@
-.TH tilde 1 "06 September 2019" "v0.0.4"
+.TH TILDE 1 "August 2023" "Tilde User Scripts" "User Commands"
+
 .SH NAME
-tilde \- wrapper for user-submitted scripts and users_info.json entrys
-supports user settings, submission and admin approval
+tilde \- manage user-submitted scripts and apps
+
 .SH SYNOPSIS
-.B tilde [options] (scriptname)
-.P
-.SH DESRIPTION
 .B tilde
-is a wrapper around user-submitted scripts.
-any accepted script in /tilde/bin can be run with
-the wrapper feature.
+[\fIOPTION\fR] [\fICOMMAND\fR]
 
-users can submit any script in their ~/bin directory
-which will be mailed to admins for review.
+.SH DESCRIPTION
+The \fBtilde\fR command is a script management tool for managing user-submitted scripts and apps on the system. It allows users to submit their scripts for approval by administrators, who can then approve or revoke them for system-wide usage.
 
-users can also manage your `users_info.json` entries from the `~/.tilde`-file.
-.SH USAGE
+By default, approved scripts are stored in the directory /tilde/bin, and their descriptions are kept in /tilde/descriptions.
+
+.SH OPTIONS
 .TP
-.B tilde list
-List all available scripts in /tilde/bin
+.B \-h, \-\-help
+Show usage information and exit.
+
 .TP
-.B tilde [scriptname]
-Run scriptname.
+.B \-v, \-\-version
+Show version information and exit.
+
+.SH COMMANDS
+The following commands are supported:
+
 .TP
-.B tilde submit
-Submit a script from your ~/bin directory
+.B list
+Show a list of approved user scripts along with their descriptions.
+
 .TP
-.B tilde about [scriptname]
-Get the submitter's description for a script.
+.B submit
+Start the submission flow for your own script. The script should be placed in the ~/bin directory, be executable, and respond to help or --help.
+
 .TP
-.B tilde show
-show your config file
+.B about \fIscript\fR
+Show the description and details of a specific script.
+
 .TP
-.B tilde edit
-edit your config file
+.B approve
+Enter the approval queue for pending scripts. This command is only accessible to the root user. Administrators can review pending submissions and approve them for system-wide usage.
+
 .TP
-.B tilde get <entry>
-show a entry from your config
+.B revoke \fIscript\fR
+Revoke a previously approved script. This command is only accessible to the root user.
+
 .TP
-.B tilde set <entry> <'value'>
-set a entry to your config
-.TP
-.B tilde unset <entry>
-unset a entry from your config
-.SH DEPENDENCIES
-None.
-.SH BUGS
-None known. Please submit to https://github.com/tildeclub/launcher
+.B run \fIscript\fR
+Run an approved script by specifying its name. The script must be available in the /tilde/bin directory.
+
+.SH PATH CONFIGURATION
+To use approved scripts without invoking the \fBtilde\fR command, you can add /tilde/bin to your PATH environment variable. By doing so, the scripts in /tilde/bin will be accessible directly from the command line.
+
+You can add /tilde/bin to your PATH by adding the following line to your shell configuration file (e.g., .bashrc or .zshrc):
+
+.BP
+\fBexport PATH=\$PATH:/tilde/bin\fR
+
+Then, restart your shell or run the following command to apply the changes:
+
+.BP
+\fBsource ~/.bashrc\fR (or \fBsource ~/.zshrc\fR for Zsh)
+
+.SH SEE ALSO
+The \fBtilde\fR command is part of the tilde-scripts package. More information about the tilde-scripts package can be found on the tilde.team website.
+
 .SH AUTHOR
-Ben Harris <ben (at) tilde (dot) team>
+\fBBen Harris\fR <\fBben@tilde.team\fR>
 
-Sven Kinne <creme (at) envs (dot) net>
+.SH COPYRIGHT
+Copyright (C) 2018 Ben Harris.
+
+.SH LICENSE
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License at <http://www.gnu.org/licenses/> for more details.
