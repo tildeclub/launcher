@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 sh -n tilde
-[ "$(./tilde --version)" = 0.2.0 ]
+[ "$(./tilde --version)" = 0.2.1 ]
 ./tilde --help | grep -q 'migrate'
 if ./tilde run '../etc/passwd' >/dev/null 2>&1; then
     printf 'Path traversal was accepted\n' >&2

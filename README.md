@@ -101,6 +101,34 @@ For an optional full test on an isolated test machine or CI runner, execute
 `sudo sh tests/integration.sh`. It creates and removes a temporary system
 account and tests under `/tmp`, without using your live `/tilde` tree.
 
+## Broken legacy entries
+
+`sudo tilde migrate` now continues past broken links, reports each one, and returns
+an error status if it skipped an unreadable or broken target. The links are not
+removed automatically. For an affected command, inspect the link and its
+submitted file without following or deleting anything:
+
+```sh
+sudo tilde status us
+sudo ls -ld /tilde/bin/us /tilde/pending-submissions/jmjl/us
+sudo readlink -- /tilde/bin/us
+sudo ls -l /tilde/pending-submissions/jmjl/us
+```
+
+The `us` and `jmjl` names above are examples. If the linked executable was
+moved or deleted, restore it under the author's `~/bin` and review it again.
+If the source is gone permanently, the administrator can explicitly run
+`sudo tilde revoke us`, confirm, and provide a reason. A broken legacy link
+whose author cannot be identified can now be revoked, but no email will be
+sent. There is no automatic deletion during migration. Old
+submissions containing broken executable symlinks are skipped with a specific
+warning, without stopping approval of other submissions.
+
+Root-owned legacy per-user pending directories can be read during approval
+when they are not group/world writable. New submissions still require the
+user's own pending directory to be owned by that user. Do not recursively
+change ownership or permissions of `/tilde` to fix a single submission.
+
 ## Recovery and rollback
 
 Before installing, archive `/tilde` and preserve the old launcher binary and

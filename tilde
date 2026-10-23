@@ -15,7 +15,7 @@ if [ "$(/usr/bin/id -u)" -eq 0 ]; then
 fi
 
 PROGNAME=${0##*/}
-VERSION=0.2.0
+VERSION=0.2.1
 ROOT=/tilde
 BIN=$ROOT/bin
 DESCRIPTIONS=$ROOT/descriptions
@@ -196,6 +196,32 @@ user_pending_dir() {
     printf '%s\n' "$dir"
 }
 
+# Older launcher versions sometimes left root-owned submission directories.
+# Admins may review those directories if root alone can change their entries.
+# Ordinary users still need user-owned directories for new submissions.
+review_user_dir() {
+    review_owner=$1
+    valid_user "$review_owner" || { warn 'invalid submission account'; return 1; }
+    review_dir=$PENDING/$review_owner
+    if [ ! -d "$review_dir" ] || [ -L "$review_dir" ]; then
+        warn "missing or unsafe submission directory: $review_dir"
+        return 1
+    fi
+    review_dir_owner=$(stat -c %U -- "$review_dir") || return 1
+    if [ "$review_dir_owner" != "$review_owner" ]; then
+        if [ "$review_dir_owner" != root ]; then
+            warn "unexpected owner of $review_dir: $review_dir_owner"
+            return 1
+        fi
+        review_mode=$(stat -c %a -- "$review_dir") || return 1
+        if [ $((0$review_mode & 0022)) -ne 0 ]; then
+            warn "root-owned legacy directory is writable by other accounts: $review_dir"
+            return 1
+        fi
+    fi
+    printf '%s\n' "$review_dir"
+}
+
 ensure_user_dir() {
     owner=$1
     valid_user "$owner" || fail 'unsupported account name'
@@ -300,15 +326,50 @@ capture() {
 capture_submission() {
     author=$1
     name=$2
-    folder=$(user_pending_dir "$author") || return 1
+    if ! getent passwd "$author" >/dev/null; then
+        warn "submission account no longer exists: $author"
+        return 1
+    fi
+    folder=$(review_user_dir "$author") || return 1
     submission=$folder/$name
-    [ -d "$submission" ] && [ ! -L "$submission" ] || return 1
+    if [ ! -d "$submission" ] || [ -L "$submission" ]; then
+        warn "missing or unsafe submission folder: $submission"
+        return 1
+    fi
+    if [ -L "$submission/$name" ] && [ ! -e "$submission/$name" ]; then
+        warn "broken submitted-script symlink: $author/$name; ask the author to restore or resubmit"
+        return 1
+    fi
+    if [ ! -f "$submission/$name" ]; then
+        warn "submitted executable is missing or not a regular file: $author/$name"
+        return 1
+    fi
+    if [ ! -f "$submission/description.txt" ]; then
+        warn "missing description: $author/$name"
+        return 1
+    fi
+    if ! runuser -u "$author" -- test -r "$submission/$name" ||
+       ! runuser -u "$author" -- test -x "$submission/$name"; then
+        warn "author cannot read or execute submitted script: $author/$name"
+        return 1
+    fi
+    if ! runuser -u "$author" -- test -r "$submission/description.txt"; then
+        warn "author cannot read submission description: $author/$name"
+        return 1
+    fi
     WORK=$(mktemp -d "$REVIEW/.review.XXXXXXXX") || fail 'cannot stage review'
-    capture "$author" "$submission/$name" "$WORK/script" "$MAX_SCRIPT" || return 1
-    capture "$author" "$submission/description.txt" "$WORK/description" "$MAX_DESCRIPTION" || return 1
-    [ -s "$WORK/script" ] && [ -s "$WORK/description" ] || return 1
-    # A submitted binary or script must be runnable by the submitter.
-    runuser -u "$author" -- test -x "$submission/$name" || return 1
+    if ! capture "$author" "$submission/$name" "$WORK/script" "$MAX_SCRIPT"; then
+        warn "cannot capture script (unreadable, changed or larger than 50 MiB): $author/$name"
+        return 1
+    fi
+    if ! capture "$author" "$submission/description.txt" "$WORK/description" "$MAX_DESCRIPTION"; then
+        warn "cannot capture description (unreadable or larger than 16 KiB): $author/$name"
+        return 1
+    fi
+    if [ ! -s "$WORK/script" ] || [ ! -s "$WORK/description" ]; then
+        warn "submitted script or description is empty: $author/$name"
+        return 1
+    fi
 }
 
 log_event() {
@@ -479,8 +540,7 @@ approve_queue() {
     for ownerdir in "$PENDING"/*; do
         [ -d "$ownerdir" ] && [ ! -L "$ownerdir" ] || continue
         author=${ownerdir##*/}
-        if ! valid_user "$author" || [ "$(stat -c %U -- "$ownerdir")" != "$author" ]; then
-            warn "skipping unsafe submission directory: $ownerdir"
+        if ! review_user_dir "$author" >/dev/null; then
             continue
         fi
         for item in "$ownerdir"/*; do
@@ -506,8 +566,14 @@ migrate_one() {
         warn "$name has already been migrated"
         return 0
     fi
-    source=$(readlink -f -- "$link") || fail "broken legacy symlink: $name"
-    [ -f "$source" ] || fail "legacy target not a file: $name"
+    if ! source=$(readlink -e -- "$link" 2>/dev/null); then
+        warn "broken legacy symlink: $name; leaving it unchanged and skipping"
+        return 1
+    fi
+    if [ ! -f "$source" ]; then
+        warn "legacy target is not a regular file: $name; skipping"
+        return 1
+    fi
     author=$(stat -c %U -- "$source") || fail 'cannot inspect author'
     valid_user "$author" || fail 'cannot determine legacy author'
     home=$(getent passwd "$author" | cut -d: -f6)
@@ -544,10 +610,15 @@ migrate_legacy() {
     if [ -n "${1-}" ]; then
         migrate_one "$1"
     else
+        skipped=0
         for item in "$BIN"/*; do
             [ -L "$item" ] || continue
-            migrate_one "${item##*/}"
+            migrate_one "${item##*/}" || skipped=$((skipped + 1))
         done
+        if [ "$skipped" -gt 0 ]; then
+            warn "migration finished with $skipped unreadable or broken link(s); no affected links were removed"
+            return 1
+        fi
     fi
 }
 
@@ -559,11 +630,20 @@ revoke_script() {
     [ -L "$link" ] || fail "$name is not an approved symlink"
     author=$(approved_author "$name" 2>/dev/null || :)
     if [ -z "$author" ]; then
-        source=$(readlink -f -- "$link") || fail 'cannot find legacy script author'
-        author=$(stat -c %U -- "$source") || fail 'cannot find script owner'
+        source=$(readlink -e -- "$link" 2>/dev/null || :)
+        if [ -n "$source" ]; then
+            author=$(stat -c %U -- "$source" 2>/dev/null || :)
+        fi
     fi
-    valid_user "$author" || fail 'invalid script owner'
-    prompt "Revoke $name by $author?" || { printf 'Cancelled.\n'; return 0; }
+    if ! valid_user "$author"; then
+        author=
+    fi
+    if [ -z "$author" ]; then
+        printf 'No author could be identified for %s. This may be a broken legacy link.\n' "$name"
+        prompt "Revoke $name (author unknown)?" || { printf 'Cancelled.\n'; return 0; }
+    else
+        prompt "Revoke $name by $author?" || { printf 'Cancelled.\n'; return 0; }
+    fi
     ask_line 'Reason: '
     reason=$INPUT
     [ -n "$reason" ] || fail 'a reason is required'
@@ -581,8 +661,12 @@ revoke_script() {
     if [ -e "$META/$name" ] || [ -L "$META/$name" ]; then
         rm -- "$META/$name" || warn 'could not remove metadata'
     fi
-    log_event "revoked $name by $author"
-    send_notice "$author" 'tilde script revoked' "$name was revoked. Reason: $reason. You may submit a revised version." || :
+    log_event "revoked $name by ${author:-unknown}"
+    if [ -n "$author" ]; then
+        send_notice "$author" 'tilde script revoked' "$name was revoked. Reason: $reason. You may submit a revised version." || :
+    else
+        warn 'author unknown; no notification sent'
+    fi
     printf '%s revoked. Older reviewed copies were retained in %s.\n' "$name" "$APPROVED/$name"
 }
 
@@ -646,7 +730,11 @@ status_script() {
     if [ -n "$author" ] && [ -L "$BIN/$name" ]; then
         printf '%s: approved (author: %s)\n' "$name" "$author"
     elif [ -L "$BIN/$name" ]; then
-        printf '%s: approved (legacy symlink; needs migration)\n' "$name"
+        if [ -f "$BIN/$name" ] && [ -x "$BIN/$name" ]; then
+            printf '%s: approved (legacy symlink; needs migration)\n' "$name"
+        else
+            printf '%s: broken or inaccessible approved symlink; requires admin review\n' "$name"
+        fi
     else
         printf '%s: not approved\n' "$name"
     fi
