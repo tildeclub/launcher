@@ -1,76 +1,91 @@
-.TH TILDE 1 "August 2023" "Tilde User Scripts" "User Commands"
-
+.TH TILDE 1 "October 2026" "Tilde User Scripts" "User Commands"
 .SH NAME
-tilde \- manage user-submitted scripts and apps
-
+tilde \- submit, review and run approved community scripts
 .SH SYNOPSIS
 .B tilde
 [\fIOPTION\fR] [\fICOMMAND\fR]
-
 .SH DESCRIPTION
-The \fBtilde\fR command is a script management tool for managing user-submitted scripts and apps on the system. It allows users to submit their scripts for approval by administrators, who can then approve or revoke them for system-wide usage.
-
-By default, approved scripts are stored in the directory /tilde/bin, and their descriptions are kept in /tilde/descriptions.
-
+The tilde launcher provides a submission and administrator approval process
+for community scripts. Approved executables are accessible from /tilde/bin.
+New approvals use reviewed, root-owned copies rather than mutable links to
+the submitting user's home directory.
 .SH OPTIONS
 .TP
-.B \-h, \-\-help
-Show usage information and exit.
-
+.B -h, --help
+Show usage and exit.
 .TP
-.B \-v, \-\-version
-Show version information and exit.
-
+.B -v, --version
+Show the version and exit.
 .SH COMMANDS
-The following commands are supported:
-
 .TP
 .B list
-Show a list of approved user scripts along with their descriptions.
-
-.TP
-.B submit
-Start the submission flow for your own script. The script should be placed in the ~/bin directory, be executable, and respond to help or --help.
-
+List approved scripts with author and description.
 .TP
 .B about \fIscript\fR
-Show the description and details of a specific script.
-
+Show its description and author. Alias: description.
+.TP
+.B submit
+Submit an executable in ~/bin for approval.
+.TP
+.B update \fIscript\fR
+Submit a new revision of a script that you own. The approved version remains
+available until the revision is accepted.
+.TP
+.B pending
+List your submissions that are not yet approved.
+.TP
+.B status \fIscript\fR
+Show the script's approval and submission status.
+.TP
+.B run \fIscript\fR [\fIarguments\fR]
+Run an approved script, forwarding its arguments.
 .TP
 .B approve
-Enter the approval queue for pending scripts. This command is only accessible to the root user. Administrators can review pending submissions and approve them for system-wide usage.
-
+Interactively approve, reject or skip pending submissions (root only).
 .TP
 .B revoke \fIscript\fR
-Revoke a previously approved script. This command is only accessible to the root user.
-
+Revoke a previously approved script after confirmation (root only).
 .TP
-.B run \fIscript\fR
-Run an approved script by specifying its name. The script must be available in the /tilde/bin directory.
-
-.SH PATH CONFIGURATION
-To use approved scripts without invoking the \fBtilde\fR command, you can add /tilde/bin to your PATH environment variable. By doing so, the scripts in /tilde/bin will be accessible directly from the command line.
-
-You can add /tilde/bin to your PATH by adding the following line to your shell configuration file (e.g., .bashrc or .zshrc):
-
-.BP
-\fBexport PATH=\$PATH:/tilde/bin\fR
-
-Then, restart your shell or run the following command to apply the changes:
-
-.BP
-\fBsource ~/.bashrc\fR (or \fBsource ~/.zshrc\fR for Zsh)
-
-.SH SEE ALSO
-The \fBtilde\fR command is part of the tilde-scripts package. More information about the tilde-scripts package can be found on the tilde.team website.
-
+.B migrate [\fIscript\fR]
+Interactively review and migrate legacy user-owned symlinks (root only).
+When no name is given, review all legacy links.
+.TP
+.B init
+Initialize secured launcher directories (root only). Does not alter
+existing approved links.
+.SH FILES
+.TP
+.I /tilde/bin
+Published command names.
+.TP
+.I /tilde/approved
+Root-owned reviewed versions.
+.TP
+.I /tilde/descriptions
+Published descriptions.
+.TP
+.I /tilde/metadata
+Root-owned approval records.
+.TP
+.I /tilde/rejected
+Root-owned rejection fingerprints.
+.TP
+.I /tilde/pending-submissions
+User-managed pending snapshots.
+.TP
+.I /tilde/review
+Private root-owned temporary review area.
+.SH NOTES
+An administrator approves an immutable snapshot of a submitted script. The
+script is captured under the submitter's user ID; it is not executed as root.
+Legacy links are not changed until an administrator explicitly migrates them.
+Single-file scripts are supported; executables requiring files beside them may
+need packaging changes before migration.
+.PP
+To run approved scripts directly, append /tilde/bin to your PATH.
 .SH AUTHOR
-\fBBen Harris\fR <\fBben@tilde.team\fR>
-
+Ben Harris <ben@tilde.team>
 .SH COPYRIGHT
 Copyright (C) 2018 Ben Harris.
-
 .SH LICENSE
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License at <http://www.gnu.org/licenses/> for more details.
+GPL-3.0-or-later. See LICENSE.

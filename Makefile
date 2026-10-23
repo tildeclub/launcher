@@ -4,20 +4,17 @@ BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
 
 install:
-	@echo Installing the executable to $(BINDIR)
-	@mkdir -p $(BINDIR)
-	@cp -f $(BASENAME) $(BINDIR)/$(BASENAME)
-	@chmod 755 $(BINDIR)/$(BASENAME)
-	@echo Installing the manual page to $(MANDIR)/man1
-	@mkdir -p $(MANDIR)/man1
-	@cp -f $(BASENAME).1 $(MANDIR)/man1/$(BASENAME).1
-	@chmod 644 $(MANDIR)/man1/$(BASENAME).1
+	@set -eu; \
+	mkdir -p "$(BINDIR)" "$(MANDIR)/man1"; \
+	install -m 0755 "$(BASENAME)" "$(BINDIR)/.$(BASENAME).new"; \
+	mv -f "$(BINDIR)/.$(BASENAME).new" "$(BINDIR)/$(BASENAME)"; \
+	install -m 0644 "$(BASENAME).1" "$(MANDIR)/man1/.$(BASENAME).1.new"; \
+	mv -f "$(MANDIR)/man1/.$(BASENAME).1.new" "$(MANDIR)/man1/$(BASENAME).1"
 
 uninstall:
-	@echo Removing the executable from $(BINDIR)
-	@rm -f $(BINDIR)/$(BASENAME)
-	@echo Removing the manual page from $(MANDIR)/man1
-	@rm -f $(BINDIR)/man1/$(BASENAME).1
+	@rm -f "$(BINDIR)/$(BASENAME)" "$(MANDIR)/man1/$(BASENAME).1"
 
-.PHONY: install uninstall
+test:
+	@sh tests/smoke.sh
 
+.PHONY: install uninstall test

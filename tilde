@@ -1,306 +1,690 @@
 #!/bin/sh
 # ---------------------------------------------------------------------------
 # tilde - manage user-submitted scripts and apps
-
 # Copyright 2018, Ben Harris <ben@tilde.team>
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License at <http://www.gnu.org/licenses/> for
-# more details.
-
-# Usage: tilde [-h|--help]
-
+#
+# GPL-3.0-or-later. See LICENSE for the full licence text.
 # ---------------------------------------------------------------------------
 
-PROGNAME=${0##*/}
-VERSION="0.1.0"
-user=$(whoami)
-hostname=$(hostname -f)
-
-# check coreutils and wrap stat for portability
-if stat -c"%U" /dev/null >/dev/null 2>/dev/null ; then
-    # GNU environment
-    stat_func () {
-        stat -c '%U' "$1"
-    }
-else
-    # BSD environment
-    stat_func () {
-        stat -f %Su "$1"
-    }
+set -u
+umask 077
+# Preserve users' PATH, especially for "tilde run". Sanitize only root commands.
+if [ "$(/usr/bin/id -u)" -eq 0 ]; then
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    export PATH
 fi
 
-isroot() {
-    [ "$(id -u)" = "0" ]
-}
+PROGNAME=${0##*/}
+VERSION=0.2.0
+ROOT=/tilde
+BIN=$ROOT/bin
+DESCRIPTIONS=$ROOT/descriptions
+PENDING=$ROOT/pending-submissions
+APPROVED=$ROOT/approved
+META=$ROOT/metadata
+REVIEW=$ROOT/review
+REJECTED=$ROOT/rejected
+LOCK=$ROOT/.launcher.lock
+MAX_SCRIPT=52428800
+MAX_DESCRIPTION=16384
+WORK=
 
-error_exit() {
-    printf "%s\n" "${1:-"unknown Error"}" >&2
+fail() {
+    printf '%s: %s\n' "$PROGNAME" "$1" >&2
     exit 1
 }
 
-signal_exit() { # Handle trapped signals
-    case $1 in
-        INT)
-            error_exit "program interrupted by user"
-            ;;
-        TERM)
-            printf "\n%s: program terminated" "$PROGNAME" >&2
-            exit
-            ;;
-        *)
-            error_exit "$PROGNAME: terminating on unknown signal"
-            ;;
+warn() {
+    printf '%s: %s\n' "$PROGNAME" "$1" >&2
+}
+
+cleanup() {
+    if [ -n "$WORK" ]; then
+        rm -rf -- "$WORK"
+        WORK=
+    fi
+}
+trap 'cleanup' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || fail 'this command requires root'
+}
+
+valid_name() {
+    case ${1-} in
+        ''|.*|*[!a-zA-Z0-9_.+-]*) return 1 ;;
+        *) return 0 ;;
     esac
 }
 
-prompt_confirm() {
-    while true; do
-        printf "%s [y/n]: " "${1:-continue?}"
-        read -r REPLY
-        case $REPLY in
-            [yY]) printf "\n" ; return 0 ;;
-            [nN]) printf "\n" ; return 1 ;;
-            *) printf " \033[31m %s \n\033[0m" "invalid input" ;;
+check_name() {
+    valid_name "${1-}" || fail 'invalid script name (use letters, numbers, _, -, + or .; not starting with .)'
+    case $1 in
+        tilde|about|description|list|ls|submit|update|approve|revoke|run|help|apropos|pending|status|migrate|init|version)
+            fail "$1 is a reserved name" ;;
+    esac
+}
+
+valid_user() {
+    case ${1-} in
+        ''|.*|*[!a-zA-Z0-9_.-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Never trust pre-existing filesystem entries when operating as root.
+trusted_dir() {
+    [ -d "$1" ] && [ ! -L "$1" ] || fail "not a directory: $1"
+    [ "$(stat -c %u -- "$1")" = 0 ] || fail "directory must be owned by root: $1"
+    mode=$(stat -c %a -- "$1") || fail "cannot stat $1"
+    [ $((0$mode & 0022)) -eq 0 ] || fail "directory is writable by group/others: $1"
+}
+
+storage_ready() {
+    trusted_dir "$ROOT"
+    trusted_dir "$BIN"
+    trusted_dir "$DESCRIPTIONS"
+    trusted_dir "$APPROVED"
+    trusted_dir "$META"
+    trusted_dir "$REJECTED"
+    trusted_dir "$REVIEW"
+    [ $((0$(stat -c %a -- "$REVIEW") & 0077)) -eq 0 ] || fail 'review directory must be private (0700)'
+    [ -d "$PENDING" ] && [ ! -L "$PENDING" ] || fail "invalid pending directory"
+    [ "$(stat -c %u -- "$PENDING")" = 0 ] || fail "pending directory must be root-owned"
+    # The pending parent must be sticky when it is publicly writable.
+    mode=$(stat -c %a -- "$PENDING") || fail 'cannot stat pending directory'
+    [ $((0$mode & 01000)) -ne 0 ] || fail 'pending directory needs the sticky bit'
+}
+
+init_storage() {
+    require_root
+    for dir in "$ROOT" "$BIN" "$DESCRIPTIONS" "$APPROVED" "$META" "$REJECTED" "$REVIEW" "$PENDING"; do
+        [ ! -L "$dir" ] || fail "refusing symlink: $dir"
+        if [ -e "$dir" ]; then
+            [ -d "$dir" ] || fail "not a directory: $dir"
+            if [ "$dir" = "$PENDING" ]; then
+                [ "$(stat -c %u -- "$dir")" = 0 ] || fail "directory must be root-owned: $dir"
+            else
+                trusted_dir "$dir"
+            fi
+        else
+            mkdir -m 0755 -- "$dir" || fail "cannot create $dir"
+        fi
+    done
+    chmod 0700 "$REVIEW" || fail 'cannot secure review directory'
+    chmod 1733 "$PENDING" || fail 'cannot secure pending directory'
+    storage_ready
+    printf 'Launcher directories are ready. Existing scripts were not changed.\n'
+}
+
+admin_lock() {
+    require_root
+    storage_ready
+    [ ! -L "$LOCK" ] || fail 'lock file must not be a symlink'
+    (umask 077; : >> "$LOCK") || fail 'cannot open lock file'
+    [ "$(stat -c %u -- "$LOCK")" = 0 ] || fail 'lock file must be root-owned'
+    exec 9>"$LOCK" || fail 'cannot lock launcher'
+    flock -n 9 || fail 'another launcher administration is in progress'
+}
+
+prompt() {
+    while :; do
+        printf '%s [y/n]: ' "$1"
+        IFS= read -r answer || return 1
+        case $answer in
+            y|Y) return 0 ;;
+            n|N) return 1 ;;
+            *) printf 'Please answer y or n.\n' ;;
         esac
     done
 }
 
+ask_line() {
+    printf '%s' "$1"
+    IFS= read -r INPUT || fail 'input cancelled'
+}
+
 help_message() {
-    cat <<-EOF
-Usage: $PROGNAME [options] [command]
+    cat <<EOF
+Usage: $PROGNAME [option] [command]
 
 Options:
-  -h, --help         Show this help message and exit
-  -v, --version      Show version information
+  -h, --help        Show this help
+  -v, --version     Show version
 
 Commands:
-  list               Show a list of approved user scripts
-  submit             Start the submission flow for your own script
-  about <script>     Show description and details of a specific script
-  approve            Enter the approval queue for pending scripts (requires root)
-  revoke <script>    Revoke a previously approved script (requires root)
-  run <script>       Run an approved script
+  list              List approved scripts
+  about <script>    Show description and author (alias: description)
+  submit            Submit a new script from ~/bin
+  update <script>   Submit an update to one of your approved scripts
+  pending           List your submitted scripts awaiting review
+  status <script>   Show the approval status of a script
+  run <script>      Run an approved script (passes along arguments)
+  approve           Review and approve pending submissions (root)
+  revoke <script>   Revoke an approved script (root)
+  migrate [script]  Review and migrate legacy symlinks (root)
+  init              Prepare secured /tilde directories (root)
 
-Please add /tilde/bin to your PATH to use approved scripts without this wrapper.
+Add /tilde/bin to PATH to run approved scripts directly.
 EOF
 }
 
-verify_script_name() {
-    if [ -z "$1" ]; then
-        error_exit "please enter a script name"
-    fi
+metadata_value() {
+    key=$1
+    file=$2
+    [ -f "$file" ] && [ ! -L "$file" ] || return 1
+    sed -n "s/^${key}=//p" "$file" | head -n 1
+}
 
-    if command -v "$1"; then
-        if [ "$(command -v "$1")" != "/home/$user/bin/$1" ]; then
-            error_exit "$1 already exists. rename your script and try again."
+approved_author() {
+    metadata_value author "$META/$1"
+}
+
+approved_digest() {
+    metadata_value sha256 "$META/$1"
+}
+
+# The user's own writable directory is never trusted as an approval record.
+user_pending_dir() {
+    owner=$1
+    valid_user "$owner" || fail "invalid username: $owner"
+    dir=$PENDING/$owner
+    [ -d "$dir" ] && [ ! -L "$dir" ] || fail "missing user submissions directory: $dir"
+    [ "$(stat -c %U -- "$dir")" = "$owner" ] || fail "submission directory ownership mismatch: $dir"
+    printf '%s\n' "$dir"
+}
+
+ensure_user_dir() {
+    owner=$1
+    valid_user "$owner" || fail 'unsupported account name'
+    [ -d "$PENDING" ] && [ ! -L "$PENDING" ] || fail 'launcher has not been initialized by an admin'
+    dir=$PENDING/$owner
+    if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+        mkdir -m 0700 -- "$dir" || fail 'cannot create your submissions directory (ask an admin if your name is taken)'
+    fi
+    user_pending_dir "$owner" >/dev/null
+}
+
+send_notice() {
+    recipient=$1
+    subject=$2
+    body=$3
+    valid_user "$recipient" || { warn 'skipping mail to invalid account'; return 1; }
+    if ! {
+        printf 'To: %s\nSubject: %s\n\n%s\n' "$recipient" "$subject" "$body"
+    } | /usr/sbin/sendmail -t; then
+        warn "email to $recipient failed; the filesystem changes were retained"
+        return 1
+    fi
+}
+
+submit_script() {
+    operation=$1
+    [ "$(id -u)" -ne 0 ] || fail 'submit as your own user, not root'
+    storage_ready
+    current_user=$(id -un) || fail 'cannot identify user'
+    valid_user "$current_user" || fail 'unsupported account name'
+    if [ "$operation" = update ]; then
+        name=${2-}
+        check_name "$name"
+        [ "$(approved_author "$name" 2>/dev/null || :)" = "$current_user" ] || fail 'only the approved author can submit an update'
+        [ -L "$BIN/$name" ] || fail 'script is not currently approved'
+    else
+        printf 'Hello, %s! Ready to submit your script?\n' "$current_user"
+        printf 'Place an executable in ~/bin that supports --help.\n'
+        prompt 'Continue?' || return 0
+        ask_line 'Script name: '
+        name=$INPUT
+        check_name "$name"
+        [ ! -e "$BIN/$name" ] && [ ! -L "$BIN/$name" ] || fail 'name already approved; use update if it is yours'
+        [ ! -f "$META/$name" ] || fail 'name already has an approval record'
+    fi
+    source=$HOME/bin/$name
+    if [ "$operation" = submit ]; then
+        located=$(command -v "$name" 2>/dev/null || :)
+        if [ -n "$located" ] && [ "$(readlink -f -- "$located" 2>/dev/null || :)" != "$(readlink -f -- "$source" 2>/dev/null || :)" ]; then
+            fail "$name is already an existing command; use another name"
         fi
     fi
-
-    if [ -x "/tilde/bin/$1" ]; then
-        error_exit "$1 is already taken. rename your script and try again."
+    [ -f "$source" ] && [ -x "$source" ] || fail "executable not found: $source"
+    if [ "$(wc -c < "$source")" -gt "$MAX_SCRIPT" ]; then
+        fail 'script is too large (limit: 50 MiB)'
     fi
+    if [ "$operation" = update ]; then
+        printf 'Updating %s (the currently approved version keeps working).\n' "$name"
+    fi
+    ask_line 'Description: '
+    description=$INPUT
+    [ -n "$description" ] || fail 'description is required'
+    [ "${#description}" -le "$MAX_DESCRIPTION" ] || fail 'description is too long'
+    prompt 'Send this version to the admins for review?' || return 0
+    ensure_user_dir "$current_user"
+    parent=$PENDING/$current_user
+    target=$parent/$name
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        [ -d "$target" ] && [ ! -L "$target" ] || fail 'unsafe existing submission directory'
+        prompt 'Replace your previous pending submission?' || return 0
+    fi
+    stage=$(mktemp -d "$parent/.submit.XXXXXXXX") || fail 'cannot stage submission'
+    if ! cp -- "$source" "$stage/$name" ||
+       ! chmod 0700 "$stage/$name" ||
+       ! printf '%s\n' "$description" > "$stage/description.txt"; then
+        rm -rf -- "$stage"
+        fail 'cannot stage submission'
+    fi
+    if [ -e "$target" ]; then
+        rm -rf -- "$target" || fail 'cannot replace your pending submission'
+    fi
+    if ! mv -- "$stage" "$target"; then
+        rm -rf -- "$stage"
+        fail 'cannot save submission'
+    fi
+    send_notice root 'tilde script submission' "Submission from $current_user: $name. Review with sudo tilde approve." || :
+    printf 'Submitted %s for review.\n' "$name"
+}
 
-    case $1 in
-        about|description|list|ls|submit|about|help|apropos|submit|approve)
-            error_exit "$1 is a subcommand of tilde. rename your script and try again."
-            ;;
-        *)
-            return
-            ;;
+# Capture potentially hostile user-controlled files *as that user*, never as root.
+# Review and publication use only the resulting root-owned immutable snapshot.
+capture() {
+    author=$1
+    path=$2
+    dest=$3
+    maximum=$4
+    [ -f "$path" ] || return 1
+    timeout 60s runuser -u "$author" -- head -c "$((maximum + 1))" -- "$path" > "$dest" || return 1
+    [ "$(wc -c < "$dest")" -le "$maximum" ] || return 1
+}
+
+capture_submission() {
+    author=$1
+    name=$2
+    folder=$(user_pending_dir "$author") || return 1
+    submission=$folder/$name
+    [ -d "$submission" ] && [ ! -L "$submission" ] || return 1
+    WORK=$(mktemp -d "$REVIEW/.review.XXXXXXXX") || fail 'cannot stage review'
+    capture "$author" "$submission/$name" "$WORK/script" "$MAX_SCRIPT" || return 1
+    capture "$author" "$submission/description.txt" "$WORK/description" "$MAX_DESCRIPTION" || return 1
+    [ -s "$WORK/script" ] && [ -s "$WORK/description" ] || return 1
+    # A submitted binary or script must be runnable by the submitter.
+    runuser -u "$author" -- test -x "$submission/$name" || return 1
+}
+
+log_event() {
+    logger -t tilde-launcher -- "$1" 2>/dev/null || :
+}
+
+write_metadata() {
+    name=$1
+    author=$2
+    digest=$3
+    temp=$(mktemp "$META/.record.XXXXXXXX") || return 1
+    if ! printf 'author=%s\nsha256=%s\napproved_at=%s\nstate=approved\n' \
+        "$author" "$digest" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$temp" ||
+       ! chmod 0644 "$temp" || ! mv -f -- "$temp" "$META/$name"; then
+        rm -f -- "$temp"
+        return 1
+    fi
+}
+
+publish() {
+    author=$1
+    name=$2
+    digest=$(sha256sum "$WORK/script" | cut -d ' ' -f 1) || fail 'cannot hash script'
+    folder=$APPROVED/$name
+    [ ! -L "$folder" ] || fail 'approved directory must not be a symlink'
+    if [ ! -e "$folder" ]; then
+        mkdir -m 0755 -- "$folder" || fail 'cannot create approved directory'
+    fi
+    trusted_dir "$folder"
+    version=$folder/$digest
+    [ ! -L "$version" ] || fail 'approved version must not be a symlink'
+    if [ ! -e "$version" ]; then
+        temp=$(mktemp "$folder/.version.XXXXXXXX") || fail 'cannot stage approved version'
+        if ! cp -- "$WORK/script" "$temp" || ! chmod 0755 "$temp" || ! mv -- "$temp" "$version"; then
+            rm -f -- "$temp"
+            fail 'cannot publish approved version'
+        fi
+    else
+        [ -f "$version" ] &&
+            [ "$(stat -c %u -- "$version")" = 0 ] &&
+            [ $((0$(stat -c %a -- "$version") & 0022)) -eq 0 ] &&
+            [ "$(sha256sum "$version" | cut -d ' ' -f 1)" = "$digest" ] || fail 'existing approved version has changed'
+    fi
+    dtmp=$(mktemp "$DESCRIPTIONS/.description.XXXXXXXX") || fail 'cannot stage description'
+    if ! cp -- "$WORK/description" "$dtmp" || ! chmod 0644 "$dtmp" || ! mv -f -- "$dtmp" "$DESCRIPTIONS/$name"; then
+        rm -f -- "$dtmp"
+        fail 'cannot publish description'
+    fi
+    old_target=$(readlink -f -- "$BIN/$name" 2>/dev/null || :)
+    chmod 0755 -- "$version" || fail 'cannot activate approved version'
+    write_metadata "$name" "$author" "$digest" || fail 'cannot save approval metadata'
+    linktmp=$BIN/.link.$name.$$
+    [ ! -e "$linktmp" ] && [ ! -L "$linktmp" ] || fail 'temporary link collision'
+    ln -s -- "$version" "$linktmp" || fail 'cannot create approved link'
+    if ! mv -Tf -- "$linktmp" "$BIN/$name"; then
+        rm -f -- "$linktmp"
+        fail 'cannot activate approved version'
+    fi
+    # Previously approved revisions are retained but no longer user-executable.
+    case $old_target in
+        "$APPROVED/$name/"*)
+            if [ "$old_target" != "$version" ]; then
+                chmod 0700 -- "$old_target" || fail 'could not restrict retired version'
+            fi ;;
     esac
+    log_event "approved $name by $author sha256=$digest"
+    send_notice "$author" 'tilde script approved' "$name is approved and available at $BIN/$name" || :
+    printf 'Approved %s by %s.\n' "$name" "$author"
 }
 
-submission_checklist() {
-    cat <<- _EOF_
-Requirements for submitting a user script or program:
-
-  - Placed in your ~/bin
-  - Executable
-  - Responds to help or --help
-  - No name collisions with existing scripts or $PROGNAME subcommands
-
-_EOF_
+review_snapshot() {
+    author=$1
+    name=$2
+    printf '\nScript: %s\nAuthor: %s\n' "$name" "$author"
+    printf 'SHA-256: %s\n' "$(sha256sum "$WORK/script" | cut -d ' ' -f 1)"
+    printf 'Description:\n'
+    LC_ALL=C cat -v "$WORK/description"
+    printf '\nSource preview (up to 80 lines / 8 KiB, control characters escaped):\n'
+    head -c 8192 "$WORK/script" | head -n 80 | LC_ALL=C cat -v
+    while :; do
+        printf '\n[a]pprove, [r]eject, [v]iew full source, [s]kip? '
+        IFS= read -r answer || return 1
+        case $answer in
+            a|A) return 0 ;;
+            r|R) return 2 ;;
+            v|V) LC_ALL=C cat -v "$WORK/script" ;;
+            s|S) return 1 ;;
+            *) printf 'Choose a, r, v or s.\n' ;;
+        esac
+    done
 }
 
-mail_body() {
-    cat <<- _EOF_
-Subject: tilde script submission from ${user}
-From: ${user}@${hostname}
-To: root@${hostname}
-
-tilde script submission from ${user}
-
-script name: $1
-
-description:
------------------------------------------------------------------------
-
-$2
-
------------------------------------------------------------------------
-You'll find the script and description in: /tilde/pending-submissions/$user/$1
-
-Run this to see the approval queue:
-sudo tilde approve
-_EOF_
+submission_fingerprint() {
+    sha256sum "$1" "$2" | cut -d ' ' -f 1 | sha256sum | cut -d ' ' -f 1
 }
 
-# Trap signals
-trap "signal_exit TERM" TERM HUP
-trap "signal_exit INT"  INT
+reject_snapshot() {
+    author=$1
+    name=$2
+    ask_line 'Reason for rejection: '
+    reason=$INPUT
+    [ -n "$reason" ] || { warn 'rejection cancelled: reason required'; return 0; }
+    dir=$REJECTED/$author
+    if [ ! -e "$dir" ]; then
+        mkdir -m 0755 -- "$dir" || fail 'cannot create rejection records'
+    fi
+    trusted_dir "$dir"
+    fingerprint=$(submission_fingerprint "$WORK/script" "$WORK/description")
+    temp=$(mktemp "$dir/.rejection.XXXXXXXX") || fail 'cannot stage rejection record'
+    if ! printf 'fingerprint=%s\nrejected_at=%s\n' \
+        "$fingerprint" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$temp" ||
+       ! chmod 0644 "$temp" || ! mv -f -- "$temp" "$dir/$name"; then
+        rm -f -- "$temp"
+        fail 'cannot save rejection record'
+    fi
+    log_event "rejected $name by $author"
+    send_notice "$author" 'tilde script rejected' "$name was not approved. Reason: $reason. You may submit a revised version." || :
+    printf 'Rejected %s by %s.\n' "$name" "$author"
+}
 
-# Parse command-line
-case $1 in
-    -h | --help)
-        help_message
-        exit 0
-        ;;
+approve_one() {
+    author=$1
+    name=$2
+    check_name "$name"
+    if ! capture_submission "$author" "$name"; then
+        warn "could not safely read $author/$name; skipping"
+        cleanup
+        return 0
+    fi
+    digest=$(sha256sum "$WORK/script" | cut -d ' ' -f 1)
+    existing_author=$(approved_author "$name" 2>/dev/null || :)
+    existing_digest=$(approved_digest "$name" 2>/dev/null || :)
+    if [ -n "$existing_author" ] && [ "$existing_author" != "$author" ]; then
+        warn "name $name belongs to $existing_author; skipping $author"
+        cleanup
+        return 0
+    fi
+    if [ "$digest" = "$existing_digest" ] && [ -L "$BIN/$name" ]; then
+        cleanup
+        return 0
+    fi
+    rejected=$(metadata_value fingerprint "$REJECTED/$author/$name" 2>/dev/null || :)
+    fingerprint=$(submission_fingerprint "$WORK/script" "$WORK/description")
+    if [ -n "$rejected" ] && [ "$rejected" = "$fingerprint" ]; then
+        cleanup
+        return 0
+    fi
+    if [ -e "$BIN/$name" ] || [ -L "$BIN/$name" ]; then
+        [ -n "$existing_author" ] || {
+            warn "$name is an untracked legacy script; use tilde migrate first"
+            cleanup
+            return 0
+        }
+        [ -L "$BIN/$name" ] || fail "refusing to replace a non-symlink: $BIN/$name"
+    fi
+    if review_snapshot "$author" "$name"; then
+        publish "$author" "$name"
+    else
+        action=$?
+        [ "$action" -ne 2 ] || reject_snapshot "$author" "$name"
+    fi
+    cleanup
+}
 
-    -v | --version)
-        printf "%s\n" "$VERSION"
-        exit 0
-        ;;
-
-    list)
-        # List approved scripts
-        printf "Available scripts:\n\n"
-        for scr in /tilde/bin/*; do
-            if [ -f "$scr" ]; then
-                script_name=$(basename "$scr")
-                target=$(readlink -f "$scr")
-                printf "%s by %s\n" "$script_name" "$(stat_func "$target")"
-                cat "/tilde/descriptions/$script_name"
-                printf "\n"
-            fi
-        done
-        ;;
-
-    about | description)
-        # Show details about a specific script
-        if [ -z "$2" ]; then
-            printf "Please provide a script name.\n"
-            exit 1
+approve_queue() {
+    admin_lock
+    printf 'Pending submissions:\n'
+    for ownerdir in "$PENDING"/*; do
+        [ -d "$ownerdir" ] && [ ! -L "$ownerdir" ] || continue
+        author=${ownerdir##*/}
+        if ! valid_user "$author" || [ "$(stat -c %U -- "$ownerdir")" != "$author" ]; then
+            warn "skipping unsafe submission directory: $ownerdir"
+            continue
         fi
+        for item in "$ownerdir"/*; do
+            [ -d "$item" ] && [ ! -L "$item" ] || continue
+            name=${item##*/}
+            valid_name "$name" || { warn "skipping invalid name $name"; continue; }
+            case $name in
+                tilde|about|description|list|ls|submit|update|approve|revoke|run|help|apropos|pending|status|migrate|init|version)
+                    continue ;;
+            esac
+            approve_one "$author" "$name"
+        done
+    done
+    printf 'Approval queue complete.\n'
+}
 
-        if [ -f "/tilde/descriptions/$2" ]; then
-            cat "/tilde/descriptions/$2"
+migrate_one() {
+    name=$1
+    check_name "$name"
+    link=$BIN/$name
+    [ -L "$link" ] || { warn "$name is not a legacy symlink; skipping"; return 0; }
+    if [ -n "$(approved_author "$name" 2>/dev/null || :)" ]; then
+        warn "$name has already been migrated"
+        return 0
+    fi
+    source=$(readlink -f -- "$link") || fail "broken legacy symlink: $name"
+    [ -f "$source" ] || fail "legacy target not a file: $name"
+    author=$(stat -c %U -- "$source") || fail 'cannot inspect author'
+    valid_user "$author" || fail 'cannot determine legacy author'
+    home=$(getent passwd "$author" | cut -d: -f6)
+    case $source in
+        "$home"/bin/*) : ;;
+        *) warn "legacy target is outside $author's ~/bin: $source"; return 0 ;;
+    esac
+    [ -f "$DESCRIPTIONS/$name" ] && [ ! -L "$DESCRIPTIONS/$name" ] || {
+        warn "missing or unsafe legacy description for $name"
+        return 0
+    }
+    [ "$(stat -c %u -- "$DESCRIPTIONS/$name")" = 0 ] || {
+        warn "legacy description $name is not root-owned"
+        return 0
+    }
+    WORK=$(mktemp -d "$REVIEW/.review.XXXXXXXX") || fail 'cannot stage migration'
+    if ! capture "$author" "$source" "$WORK/script" "$MAX_SCRIPT" ||
+       ! cp -- "$DESCRIPTIONS/$name" "$WORK/description"; then
+        warn "could not capture legacy $name"
+        cleanup
+        return 0
+    fi
+    [ "$(wc -c < "$WORK/description")" -le "$MAX_DESCRIPTION" ] || fail 'legacy description is too large'
+    printf '\nLegacy link: %s -> %s\n' "$name" "$source"
+    printf 'The reviewed copy will be immutable. Scripts requiring adjacent files may need changes.\n'
+    if review_snapshot "$author" "$name"; then
+        publish "$author" "$name"
+    fi
+    cleanup
+}
+
+migrate_legacy() {
+    admin_lock
+    if [ -n "${1-}" ]; then
+        migrate_one "$1"
+    else
+        for item in "$BIN"/*; do
+            [ -L "$item" ] || continue
+            migrate_one "${item##*/}"
+        done
+    fi
+}
+
+revoke_script() {
+    admin_lock
+    name=${1-}
+    check_name "$name"
+    link=$BIN/$name
+    [ -L "$link" ] || fail "$name is not an approved symlink"
+    author=$(approved_author "$name" 2>/dev/null || :)
+    if [ -z "$author" ]; then
+        source=$(readlink -f -- "$link") || fail 'cannot find legacy script author'
+        author=$(stat -c %U -- "$source") || fail 'cannot find script owner'
+    fi
+    valid_user "$author" || fail 'invalid script owner'
+    prompt "Revoke $name by $author?" || { printf 'Cancelled.\n'; return 0; }
+    ask_line 'Reason: '
+    reason=$INPUT
+    [ -n "$reason" ] || fail 'a reason is required'
+    old_target=$(readlink -f -- "$link" 2>/dev/null || :)
+    # Retire the previously published file before removing its public link.
+    case $old_target in
+        "$APPROVED/$name/"*)
+            chmod 0700 -- "$old_target" || fail 'could not restrict revoked executable' ;;
+    esac
+    # Only unlink exact, validated entries. Do not recurse into user submissions.
+    rm -- "$link" || fail 'could not revoke executable'
+    if [ -e "$DESCRIPTIONS/$name" ] || [ -L "$DESCRIPTIONS/$name" ]; then
+        rm -- "$DESCRIPTIONS/$name" || warn 'could not remove description'
+    fi
+    if [ -e "$META/$name" ] || [ -L "$META/$name" ]; then
+        rm -- "$META/$name" || warn 'could not remove metadata'
+    fi
+    log_event "revoked $name by $author"
+    send_notice "$author" 'tilde script revoked' "$name was revoked. Reason: $reason. You may submit a revised version." || :
+    printf '%s revoked. Older reviewed copies were retained in %s.\n' "$name" "$APPROVED/$name"
+}
+
+list_scripts() {
+    printf 'Available scripts:\n\n'
+    for item in "$BIN"/*; do
+        [ -x "$item" ] && [ -f "$item" ] || continue
+        name=${item##*/}
+        author=$(approved_author "$name" 2>/dev/null || :)
+        if [ -z "$author" ]; then
+            author=$(stat -c %U -- "$item" 2>/dev/null || printf unknown)
+        fi
+        printf '%s by %s\n' "$name" "$author"
+        if [ -f "$DESCRIPTIONS/$name" ]; then
+            cat -- "$DESCRIPTIONS/$name"
+        fi
+        printf '\n'
+    done
+}
+
+about_script() {
+    name=${1-}
+    check_name "$name"
+    [ -f "$DESCRIPTIONS/$name" ] || fail "$name not found; use '$PROGNAME list'"
+    cat -- "$DESCRIPTIONS/$name"
+    author=$(approved_author "$name" 2>/dev/null || :)
+    [ -z "$author" ] || printf '\nAuthor: %s\n' "$author"
+}
+
+pending_scripts() {
+    current_user=$(id -un)
+    valid_user "$current_user" || fail 'unsupported account name'
+    [ -d "$PENDING/$current_user" ] || { printf 'No submissions.\n'; return 0; }
+    folder=$(user_pending_dir "$current_user") || return 1
+    found=0
+    for item in "$folder"/*; do
+        [ -d "$item" ] && [ ! -L "$item" ] || continue
+        name=${item##*/}
+        valid_name "$name" || continue
+        current=$(approved_digest "$name" 2>/dev/null || :)
+        submitted=$(sha256sum "$item/$name" 2>/dev/null | cut -d ' ' -f 1)
+        if [ -n "$current" ] && [ "$current" = "$submitted" ] && [ -L "$BIN/$name" ]; then
+            continue
+        fi
+        rejected=$(metadata_value fingerprint "$REJECTED/$current_user/$name" 2>/dev/null || :)
+        fingerprint=$(submission_fingerprint "$item/$name" "$item/description.txt" 2>/dev/null || :)
+        if [ -n "$fingerprint" ] && [ "$fingerprint" = "$rejected" ]; then
+            printf '%s (rejected; revise with submit)\n' "$name"
         else
-            printf "%s not found. Use '%s list' to see available user scripts.\n" "$2" "$PROGNAME"
-            exit 1
+            printf '%s (awaiting review)\n' "$name"
         fi
-        ;;
+        found=1
+    done
+    [ "$found" -eq 1 ] || printf 'No pending submissions.\n'
+}
 
-    submit)
-        # Submit a user script
-        printf "Hello, %s! Ready to submit your script?\n" "$user"
-        submission_checklist
-        prompt_confirm "Are you ready to continue?" || exit
-
-        printf "Enter the name of your script: "
-        read -r script_name
-        verify_script_name "$script_name"
-
-        if [ ! -x "$HOME/bin/$script_name" ]; then
-            error_exit "$script_name not found in ~/bin"
+status_script() {
+    name=${1-}
+    check_name "$name"
+    author=$(approved_author "$name" 2>/dev/null || :)
+    if [ -n "$author" ] && [ -L "$BIN/$name" ]; then
+        printf '%s: approved (author: %s)\n' "$name" "$author"
+    elif [ -L "$BIN/$name" ]; then
+        printf '%s: approved (legacy symlink; needs migration)\n' "$name"
+    else
+        printf '%s: not approved\n' "$name"
+    fi
+    current_user=$(id -un)
+    if [ -d "$PENDING/$current_user/$name" ]; then
+        submission=$PENDING/$current_user/$name
+        fingerprint=$(submission_fingerprint "$submission/$name" "$submission/description.txt" 2>/dev/null || :)
+        rejected=$(metadata_value fingerprint "$REJECTED/$current_user/$name" 2>/dev/null || :)
+        if [ -n "$fingerprint" ] && [ "$fingerprint" = "$rejected" ]; then
+            printf 'Latest submission: rejected (submit a revision).\n'
+        elif [ -n "$author" ] && [ "$author" = "$current_user" ] &&
+             [ "$(sha256sum "$submission/$name" 2>/dev/null | cut -d ' ' -f 1)" = "$(approved_digest "$name" 2>/dev/null || :)" ]; then
+            printf 'Submitted version matches the current approval.\n'
+        else
+            printf 'A submission is awaiting review for %s.\n' "$current_user"
         fi
+    fi
+}
 
-        printf "Enter a description for your script: \n"
-        read -r description
-        printf "\nYour script and description will be sent to the admins for approval.\n"
-        prompt_confirm "Ready to submit?" || exit
-
-        # Submit now
-        mkdir -p "/tilde/pending-submissions/$user/$script_name"
-        ln -s "$HOME/bin/$script_name" "/tilde/pending-submissions/$user/$script_name/$script_name"
-        printf "%s\n" "$description" > "/tilde/pending-submissions/$user/$script_name/description.txt"
-        mail_body "$script_name" "$description" | /usr/sbin/sendmail root
-        printf "Script submitted. Thank you! :)\n"
-        ;;
-
-    approve)
-        # Approve pending scripts (requires root)
-        isroot || \
-            error_exit "Re-run this as root to access the approval queue."
-        printf "Welcome to the approval queue\n\n"
-
-        for user_submission in /tilde/pending-submissions/*; do
-            user=$(basename "$user_submission")
-            for script in "$user_submission"/*; do
-                script_name=$(basename "$script")
-                [ -f "$script/approved" ] && continue
-
-                printf "Script name: %s\n" "$script_name"
-                cat "$script/description.txt"
-                prompt_confirm "Approve?" || continue
-
-                ln -s "$(readlink -f "$script/$script_name")" "/tilde/bin/$script_name"
-                cp "$script/description.txt" "/tilde/descriptions/$script_name"
-                touch "$script/approved"
-                chmod 664 "/tilde/descriptions/$script_name"
-                printf "Your submission of %s has been approved and is now available at /tilde/bin/%s\n" "$script_name" "$script_name" \
-                    | sendmail "$user"
-            done
-        done
-        printf "~~Done for now~~\n"
-        ;;
-
-    revoke)
-        # Revoke an approved script (requires root)
-        isroot || \
-            error_exit "Re-run this as root to access the revoke menu."
-        [ -f "/tilde/bin/$2" ] || \
-            error_exit "$2 isn't an approved script"
-
-        prompt_confirm "revoke $2?"
-        printf "please provide a reason: "
-        read -r reason
-
-        original_script=$(readlink -f "/tilde/bin/$2")
-        author=$(stat_func "$original_script")
-        rm "/tilde/bin/$2"
-        rm "/tilde/descriptions/$2"
-        rm -rf "/tilde/pending-submissions/$author/$2"
-
-        printf "your script %s has been returned because: %s\nfeel free to resubmit\n" "$2" "$reason" \
-            | sendmail "$author"
-
-        printf "%s revoked and returned to author" "$2"
-        ;;
-
+case ${1-} in
+    -h|--help|'') help_message ;;
+    -v|--version) printf '%s\n' "$VERSION" ;;
+    init) init_storage ;;
+    list|ls) list_scripts ;;
+    about|description) about_script "${2-}" ;;
+    submit) submit_script submit ;;
+    update) submit_script update "${2-}" ;;
+    pending) pending_scripts ;;
+    status) status_script "${2-}" ;;
+    approve) approve_queue ;;
+    migrate) migrate_legacy "${2-}" ;;
+    revoke) revoke_script "${2-}" ;;
     run)
-        # Run an approved script
-        if [ -z "$2" ]; then
-            printf "Please provide a script name.\n"
-            help_message
-            exit 1
-        fi
-
-        if [ -x "/tilde/bin/$2" ]; then
-            prog="/tilde/bin/$2"
-            shift 2  # Shift twice to remove both 'run' and 'tcoin'
-            exec "$prog" "$@"
-        else
-            printf "%s not found or not approved yet. Use '%s list' to see available user scripts.\n" "$2" "$PROGNAME"
-            exit 1
-        fi
+        name=${2-}
+        check_name "$name"
+        [ -f "$BIN/$name" ] && [ -x "$BIN/$name" ] || fail "$name not found or not approved"
+        shift 2
+        exec "$BIN/$name" "$@"
         ;;
-
-    "")
-        help_message
-        exit 0
-        ;;
-
-    *)
-        printf "Invalid command: %s\n" "$1"
-        help_message
-        exit 1
-        ;;
+    *) fail "invalid command: $1 (use --help)" ;;
 esac

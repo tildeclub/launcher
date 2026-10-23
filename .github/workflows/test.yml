@@ -1,0 +1,15 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax and smoke tests
+        run: sh tests/smoke.sh
+      - name: Approval and migration integration tests
+        run: sudo sh tests/integration.sh
