@@ -285,7 +285,7 @@ case $1 in
 
         if [ -x "/tilde/bin/$2" ]; then
             prog="/tilde/bin/$2"
-            shift
+            shift 2  # Shift twice to remove both 'run' and 'tcoin'
             exec "$prog" "$@"
         else
             printf "%s not found or not approved yet. Use '%s list' to see available user scripts.\n" "$2" "$PROGNAME"
